@@ -4,19 +4,22 @@ import os
 import time
 import uuid
 from datetime import datetime
+import requests
 
-# --- CẤU HÌNH ---
 FILE_PATH = "chat_history_v2.json"
+
+# --- CẬP NHẬT LINK PINGGY MỚI TẠI ĐÂY ---
+# Mình đã thêm đuôi /api/generate vào link bạn gửi
+API_URL = "https://uotqo-34-142-176-134.a.free.pinggy.link/api/generate"
 
 st.set_page_config(
     page_title="Advanced Chatbot", 
     page_icon="🤖",
-    layout="wide" # Đổi sang wide để sidebar thoáng hơn
+    layout="wide" 
 )
 
-# --- XỬ LÝ DỮ LIỆU ---
+# #taitufilejsom
 def load_data():
-    """Load toàn bộ dữ liệu chat từ file JSON"""
     if not os.path.exists(FILE_PATH):
         return {}
     try:
@@ -26,21 +29,38 @@ def load_data():
         return {}
 
 def save_data(data):
-    """Lưu toàn bộ dữ liệu vào file JSON"""
+    #luudulieu
     try:
         with open(FILE_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
         st.error(f"Lỗi khi lưu file: {e}")
 
-# --- QUẢN LÝ SESSION STATE ---
-# Khởi tạo dữ liệu trong RAM nếu chưa có
+def get_ai_response(user_input):
+    payload = {
+        # Đảm bảo tên model này khớp với model đang chạy trên server của bạn
+        "model": "gpt-oss:20b",
+        "prompt": user_input,
+        "stream": False
+    }
+    try:
+        # Gửi request POST
+        r = requests.post(API_URL, json=payload, timeout=60)
+        
+        if r.status_code == 200:
+            # Lấy nội dung trả lời từ JSON
+            return r.json().get("response", "Model không trả về nội dung.")
+        else:
+            return f"Lỗi API ({r.status_code}): {r.text}"
+    except requests.exceptions.ConnectionError:
+        return "Lỗi kết nối: Không thể gọi đến server (Link Pinggy có thể sai hoặc server chưa bật)."
+    except Exception as e:
+        return f"Đã xảy ra lỗi: {e}"
+
 if "all_chats" not in st.session_state:
     st.session_state.all_chats = load_data()
 
-# Xác định ID phiên chat hiện tại
 if "current_chat_id" not in st.session_state:
-    # Nếu có lịch sử, lấy cái mới nhất, nếu không thì tạo mới
     if st.session_state.all_chats:
         st.session_state.current_chat_id = list(st.session_state.all_chats.keys())[-1]
     else:
@@ -52,12 +72,10 @@ if "current_chat_id" not in st.session_state:
         }
         st.session_state.current_chat_id = new_id
 
-# --- HÀM HỖ TRỢ ---
-def create_new_chat():
-    """Tạo một phiên chat mới và chuyển hướng tới nó"""
+def create_new_chat(chat_name):
     new_id = str(uuid.uuid4())
     st.session_state.all_chats[new_id] = {
-        "title": "Cuộc trò chuyện mới", 
+        "title": chat_name, 
         "messages": [],
         "timestamp": str(datetime.now())
     }
@@ -65,12 +83,10 @@ def create_new_chat():
     save_data(st.session_state.all_chats)
 
 def delete_chat(chat_id_to_delete):
-    """Xóa một phiên chat cụ thể theo ID"""
+    #xoadoanchat
     if chat_id_to_delete in st.session_state.all_chats:
         del st.session_state.all_chats[chat_id_to_delete]
         save_data(st.session_state.all_chats)
-        
-        # Nếu đang xóa đúng đoạn chat hiện tại, phải chuyển sang đoạn khác
         if st.session_state.current_chat_id == chat_id_to_delete:
             if st.session_state.all_chats:
                 st.session_state.current_chat_id = list(st.session_state.all_chats.keys())[-1]
@@ -78,7 +94,6 @@ def delete_chat(chat_id_to_delete):
                 create_new_chat()
     st.rerun()
 
-# --- CSS STYLING ---
 st.markdown("""
 <style>
     body { background-color: #0e1117; color: #e0e0e0; }
@@ -122,10 +137,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- DIALOG (POPUP) XÓA CHAT ---
 @st.dialog("Xác nhận xóa")
 def confirm_delete_dialog(chat_id):
-    st.write("Bạn có chắc chắn muốn xóa cuộc trò chuyện này không?")
+    st.write("Bạn có chắc chắn xóa cuộc trò chuyện này không?")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Hủy"):
@@ -134,19 +148,33 @@ def confirm_delete_dialog(chat_id):
         if st.button("Xóa ngay", type="primary"):
             delete_chat(chat_id)
 
-# --- SIDEBAR: LỊCH SỬ CHAT ---
+@st.dialog("Đặt tên cho cuộc trò chuyện")
+def name_new_chat_dialog():
+    chat_name = st.text_input("Nhập tên cuộc trò chuyện:", "")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Hủy"):
+            st.rerun()
+
+    with col2:
+        if st.button("Tạo", type="primary"):
+            if chat_name.strip() == "":
+                st.warning("Vui lòng nhập tên!")
+                st.stop()
+            create_new_chat(chat_name)
+            st.rerun()
+
+
+#sidebar
 with st.sidebar:
     st.title("💬 Lịch sử Chat")
-    
-    # Nút tạo chat mới
+
     if st.button("➕ Cuộc trò chuyện mới", use_container_width=True, type="primary"):
-        create_new_chat()
-        st.rerun()
+        name_new_chat_dialog()
     
     st.divider()
     
-    # Danh sách các đoạn chat cũ
-    # Sắp xếp theo thời gian mới nhất lên đầu
     sorted_chat_ids = sorted(
         st.session_state.all_chats.keys(), 
         key=lambda k: st.session_state.all_chats[k].get("timestamp", ""), 
@@ -154,17 +182,15 @@ with st.sidebar:
     )
 
     st.caption("Gần đây")
+    #hienthi
     for chat_id in sorted_chat_ids:
         chat_data = st.session_state.all_chats[chat_id]
         title = chat_data.get("title", "Không có tiêu đề")
         
-        # Chia cột: 85% cho tên chat, 15% cho nút xóa
         col1, col2 = st.columns([0.85, 0.15])
         
         with col1:
-            # Highlight chat đang chọn
             button_type = "secondary" if chat_id != st.session_state.current_chat_id else "primary"
-            # Cắt ngắn tiêu đề nếu quá dài
             display_title = (title[:22] + '...') if len(title) > 22 else title
             
             if st.button(f"🗨️ {display_title}", key=f"btn_{chat_id}", use_container_width=True, type=button_type):
@@ -172,59 +198,45 @@ with st.sidebar:
                 st.rerun()
         
         with col2:
-            # Nút xóa nhỏ bên cạnh, dùng key khác để tránh trùng lặp
             if st.button("🗑️", key=f"del_{chat_id}", help="Xóa chat này"):
                 confirm_delete_dialog(chat_id)
 
-# --- MAIN CHAT AREA ---
-# Lấy dữ liệu của session hiện tại
 current_id = st.session_state.current_chat_id
 current_chat_data = st.session_state.all_chats.get(current_id, {})
 current_messages = current_chat_data.get("messages", [])
 current_title = current_chat_data.get("title", "Cuộc trò chuyện mới")
 
-# Header khu vực chat (Đã bỏ nút xóa ở đây vì đã có trong sidebar)
 st.subheader(f"{current_title}")
 st.divider()
 
-# Hiển thị tin nhắn cũ
 for message in current_messages:
     if message["role"] == "user":
         st.markdown(f'<div class="chat-message user-msg">{message["content"]}</div>', unsafe_allow_html=True)
     else:
         st.markdown(f'<div class="chat-message assistant-msg">{message["content"]}</div>', unsafe_allow_html=True)
 
-# Input xử lý tin nhắn mới
+
 if prompt := st.chat_input("Nhập tin nhắn..."):
-    # 1. Hiển thị tin nhắn User
+
     st.markdown(f'<div class="chat-message user-msg">{prompt}</div>', unsafe_allow_html=True)
     
-    # 2. Cập nhật dữ liệu vào biến tạm
     current_messages.append({"role": "user", "content": prompt})
     
-    # Cập nhật tiêu đề nếu đây là tin nhắn đầu tiên
+    should_rerun = False
     if len(current_messages) == 1:
         st.session_state.all_chats[current_id]["title"] = prompt
-        st.rerun() # Rerun để cập nhật tên bên sidebar ngay lập tức
+        should_rerun = True
 
-    # 3. Logic Bot trả lời (Giữ nguyên logic của bạn)
     message_placeholder = st.empty()
+    # Hien thi trang thai dang suy nghi
+    message_placeholder.markdown('<div class="chat-message assistant-msg">Bot đang suy nghĩ...</div>', unsafe_allow_html=True)
+
+    # Goi API thay cho doan if/else cu
+    response_text = get_ai_response(prompt)
+    
     full_response = ""
-    response_text = ""
-
-    prompt_lower = prompt.lower()
-    if"xin chào" in prompt.lower() or "chào bạn" in prompt.lower():
-            response_text="Chào bạn! Tôi có thể giúp gì cho bạn?"
-    elif "thời tiết" in prompt.lower():
-            response_text="Tôi không thể dự báo thời tiết. Bạn có thể kiếm tra trên Google hoặc ứng dụng thời tiết nhé!"
-    elif"bạn là ai" in prompt.lower():
-            response_text="Tôi là một chatbot được bởi Nhóm 5, 25CTT3. Rất vui được trò chuyện với bạn!"
-    elif"tên bạn là gì" in prompt.lower():
-            response_text="Tôi không có tên cụ thể, bạn có thể gọi tôi là Group 5 Bot."
-    else:
-            response_text="Xin lỗi, tôi chưa hiểu câu hỏi của bạn. Bạn có thể thử hỏi câu khác không?"
-
-    # 4. Hiệu ứng gõ chữ
+    
+    #hieung
     i = 0
     while i < len(response_text):
         char = response_text[i]
@@ -233,18 +245,26 @@ if prompt := st.chat_input("Nhập tin nhắn..."):
             f'<div class="chat-message assistant-msg">{full_response}<span class="blink">▌</span></div>', 
             unsafe_allow_html=True
         )
-        # Logic delay
-        if char in ".!?": time.sleep(0.05) # Giảm delay chút cho nhanh hơn demo
-        elif char in ",;:": time.sleep(0.03)
-        else: time.sleep(0.01)
-        i += 1
+        
+        if char in ".!?":
+            time.sleep(0.05)
+            if i + 1 < len(response_text) and response_text[i+1] == " ":
+                time.sleep(0.03)
+        elif char in ",;:":
+            time.sleep(0.03)
+        else:
+            time.sleep(0.01)
 
-    # 5. Lưu tin nhắn Bot vào session
+        i += 1
+    
+    #luulichsu
     current_messages.append({"role": "assistant", "content": full_response})
     
-    # 6. Cập nhật vào Session State tổng và Lưu File
+    #capnhatvaluufile
     st.session_state.all_chats[current_id]["messages"] = current_messages
     save_data(st.session_state.all_chats)
     
-    # Xóa con trỏ nhấp nháy cuối cùng
     message_placeholder.markdown(f'<div class="chat-message assistant-msg">{full_response}</div>', unsafe_allow_html=True)
+
+    if should_rerun:
+        st.rerun()
